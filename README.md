@@ -1,0 +1,2 @@
+# ingen
+Generator example
