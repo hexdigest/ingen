@@ -1,17 +1,16 @@
 package main
 
 import (
-	"bytes"
 	"flag"
 	"go/ast"
 	"go/types"
 	"log"
 	"os"
 	"path/filepath"
-	"text/template"
+
+	"github.com/gojuno/generator"
 
 	"golang.org/x/tools/go/loader"
-	"golang.org/x/tools/imports"
 )
 
 type Visitor struct {
@@ -66,18 +65,18 @@ func main() {
 	}
 
 	pkg := prog.Package(*pkgPath)
-
 	v := &Visitor{PackageInfo: pkg}
+
+	gen := generator.New(prog)
+	gen.ImportWithAlias(*pkgPath, "")
+	gen.SetPackageName(v.Pkg.Name())
+	gen.SetHeader("This code was automatically generated. Please don't modify")
+
 	for _, f := range pkg.Files {
 		ast.Walk(v, f)
 	}
 
-	buf := bytes.NewBuffer([]byte{})
-
-	template.Must(template.New("").Parse(`
-		//This code was automatically generated. Please don't modify
-		package {{.Pkg.Name}}
-
+	gen.ProcessTemplate("", `
 		{{ range .FoundTypes }}
 			func (v {{.}}) In(list ...{{.}}) bool {
 				for _, l := range list {
@@ -88,38 +87,12 @@ func main() {
 				return false
 			}
 		{{ end }}
-	`)).Execute(buf, v)
+	`, v)
 
-	var pkgAbsPath string
-	for _, path := range filepath.SplitList(os.Getenv("GOPATH")) {
-		fullPath := filepath.Join(path, "src", *pkgPath)
-		pkgAbsPath, err = filepath.Abs(fullPath)
-		if err != nil {
-			continue
-		}
-
-		if _, err = os.Stat(fullPath); err != nil {
-			continue
-		}
-	}
-
-	outFile := filepath.Join(pkgAbsPath, "type_helpers.go")
-
-	formatted, err := imports.Process(outFile, buf.Bytes(), nil)
+	pkgAbsPath, err := generator.PackageAbsPath(*pkgPath)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	f, err := os.Create(outFile)
-	if err != nil {
-		log.Fatalf("failed to create file: %v", err)
-	}
-
-	if _, err := f.Write(formatted); err != nil {
-		log.Fatalf("failed to write formatted source: %v", err)
-	}
-
-	if err := f.Close(); err != nil {
-		log.Fatalf("failed to close file: %v", err)
-	}
+	gen.WriteToFilename(filepath.Join(pkgAbsPath, "type_helpers.go"))
 }
